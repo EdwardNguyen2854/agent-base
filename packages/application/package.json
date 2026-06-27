@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-publishing.js": "./src/agent-publishing.ts",
     "./initialize-installation.js": "./src/initialize-installation.ts"
   },
   "scripts": {

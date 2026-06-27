@@ -26,6 +26,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@agent-base/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@agent-base/infrastructure':
         specifier: workspace:*
         version: link:../../packages/infrastructure

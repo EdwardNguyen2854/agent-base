@@ -9,7 +9,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { seedGeneralResearchAgent } from "@agent-base/application/agent-publishing.js";
 import { initializeInstallation } from "@agent-base/application/initialize-installation.js";
+import type { Installation } from "@agent-base/domain/installation.js";
 import {
   initializeApplicationDatabase,
   probeDatabase,
@@ -62,7 +64,7 @@ export class AgentBaseRuntime {
     this.dependencies = { probeDatabase, ...dependencies };
   }
 
-  async initialize(): Promise<void> {
+  async initialize(): Promise<Installation> {
     mkdirSync(this.config.logsDirectory, { recursive: true });
     mkdirSync(this.config.runDirectory, { recursive: true });
     if (
@@ -98,18 +100,32 @@ export class AgentBaseRuntime {
       this.config.database.adminUrl,
       this.password,
     );
-    await initializeApplicationDatabase(
+    return initializeApplicationDatabase(
       this.config.database.url,
       path.join(this.appRoot, "packages/infrastructure/migrations"),
-      initializeInstallation,
+      async (repositories) => {
+        const installation = await initializeInstallation(
+          repositories.installation,
+        );
+        await seedGeneralResearchAgent(
+          repositories.agent,
+          installation.workspace.id,
+          installation.owner.id,
+        );
+        return installation;
+      },
     );
   }
 
   async start(): Promise<RuntimeStatus> {
-    await this.initialize();
+    const installation = await this.initialize();
     this.startManagedProcess(
       "worker",
       path.join(this.appRoot, "apps/worker/dist/src/main.js"),
+      {
+        AGENT_BASE_OWNER_ID: installation.owner.id,
+        AGENT_BASE_WORKSPACE_ID: installation.workspace.id,
+      },
     );
     this.startManagedProcess(
       "web",
@@ -117,6 +133,8 @@ export class AgentBaseRuntime {
       {
         HOSTNAME: this.config.web.host,
         PORT: String(this.config.web.port),
+        AGENT_BASE_OWNER_ID: installation.owner.id,
+        AGENT_BASE_WORKSPACE_ID: installation.workspace.id,
       },
     );
     for (let attempt = 0; attempt < 30; attempt += 1) {
