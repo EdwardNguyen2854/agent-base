@@ -8,12 +8,10 @@ test("installed Agent Base exposes a healthy loopback interface", async ({
 
   await expect(
     page.getByRole("heading", {
-      name: "Your local research workspace is running.",
+      name: "Good morning, Owner",
     }),
   ).toBeVisible();
-  await expect(page.getByText("web: healthy")).toBeVisible();
-  await expect(page.getByText("worker: healthy")).toBeVisible();
-  await expect(page.getByText("database: healthy")).toBeVisible();
+  await expect(page.getByText("All systems operational")).toBeVisible();
 
   const health = await request.get("/api/health");
   expect(health.status()).toBe(200);
@@ -25,6 +23,7 @@ test("Owner can edit the Agent Draft and publish a new immutable version", async
   request,
 }) => {
   await page.goto("/agents");
+  await page.getByText("Backend Agent settings").click();
 
   const initial = await request.get("/api/agent");
   expect(initial.status()).toBe(200);
