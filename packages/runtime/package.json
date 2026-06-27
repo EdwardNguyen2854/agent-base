@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc -b && esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/agent-base.mjs",
     "acceptance:macos": "tsx scripts/accept-macos.ts",
-    "dev": "tsx src/cli.ts start --foreground",
+    "dev": "tsx scripts/dev.ts start --foreground",
     "stage:windows": "node dist/scripts/stage-windows.js",
     "typecheck": "tsc -b --pretty false"
   },
