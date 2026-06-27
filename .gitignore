@@ -1,2 +1,9 @@
 ._*
 .agent-base/
+.corepack/
+.next/
+dist/
+node_modules/
+release/stage/
+test-results/
+*.tsbuildinfo

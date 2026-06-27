@@ -1,0 +1,82 @@
+name: Windows acceptance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24.18.0
+  POSTGRES_VERSION: 18.4-1
+  PGVECTOR_VERSION: 0.8.2
+
+jobs:
+  native-installation:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Stage application
+        run: pnpm windows:stage
+      - name: Bundle Node.js
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://nodejs.org/download/release/v$env:NODE_VERSION/node-v$env:NODE_VERSION-win-x64.zip" -OutFile node.zip
+          Expand-Archive node.zip node
+          New-Item -ItemType Directory -Force release/stage/runtime/node
+          Copy-Item "node/node-v$env:NODE_VERSION-win-x64/*" release/stage/runtime/node -Recurse
+      - name: Bundle PostgreSQL
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://get.enterprisedb.com/postgresql/postgresql-$env:POSTGRES_VERSION-windows-x64-binaries.zip" -OutFile postgres.zip
+          Expand-Archive postgres.zip postgres
+          New-Item -ItemType Directory -Force release/stage/runtime/postgres
+          Copy-Item postgres/pgsql/* release/stage/runtime/postgres -Recurse
+      - name: Build bundled pgvector
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          git clone --depth 1 --branch v%PGVECTOR_VERSION% https://github.com/pgvector/pgvector.git
+          set "PGROOT=%CD%\release\stage\runtime\postgres"
+          cd pgvector
+          nmake /F Makefile.win
+          nmake /F Makefile.win install
+      - name: Build installer
+        shell: pwsh
+        run: iscc packaging/windows/agent-base.iss
+      - name: Verify clean-path installation lifecycle
+        shell: pwsh
+        run: |
+          $install = Join-Path $env:RUNNER_TEMP "AgentBaseAcceptance"
+          Start-Process release/agent-base-0.1.0-windows-x64.exe -ArgumentList "/VERYSILENT", "/DIR=$install" -Wait
+          $developmentPath = $env:Path
+          $cleanPath = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:Path = $cleanPath
+          & "$install\controls\AgentBase.ps1" start
+          $env:Path = $developmentPath
+          pnpm exec playwright install chromium
+          pnpm exec playwright test
+          $env:Path = $cleanPath
+          $health = & "$install\controls\AgentBase.ps1" health | ConvertFrom-Json
+          if ($health.status -ne "healthy") { throw "Runtime is not healthy" }
+          $listeners = Get-NetTCPConnection -State Listen | Where-Object LocalPort -In 3210,54321
+          if ($listeners.Where({$_.LocalAddress -ne "127.0.0.1"}).Count) { throw "A runtime listener is not loopback-only" }
+          & "$install\controls\AgentBase.ps1" stop
+          if ((& "$install\controls\AgentBase.ps1" health | ConvertFrom-Json).status -ne "stopped") { throw "Runtime did not stop" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-base-windows-x64
+          path: release/agent-base-0.1.0-windows-x64.exe

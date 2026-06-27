@@ -1,0 +1,12 @@
+{
+  "name": "@agent-base/domain",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./installation.js": "./src/installation.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  }
+}

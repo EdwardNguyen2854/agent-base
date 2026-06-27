@@ -1,0 +1,25 @@
+{
+  "name": "agent-base",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "dev": "pnpm build && pnpm --filter @agent-base/runtime dev",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --build",
+    "windows:stage": "pnpm --filter @agent-base/runtime stage:windows"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.1.1",
+    "@playwright/test": "1.53.2",
+    "@types/node": "24.0.10",
+    "typescript": "5.8.3",
+    "vitest": "3.2.4"
+  }
+}

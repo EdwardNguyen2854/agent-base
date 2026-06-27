@@ -1,0 +1,20 @@
+{
+  "name": "@agent-base/runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b && esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/agent-base.mjs",
+    "dev": "tsx src/cli.ts start --foreground",
+    "stage:windows": "node dist/scripts/stage-windows.js",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@agent-base/application": "workspace:*",
+    "@agent-base/domain": "workspace:*",
+    "postgres": "3.4.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "tsx": "4.20.3"
+  }
+}
