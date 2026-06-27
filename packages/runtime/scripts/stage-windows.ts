@@ -10,10 +10,18 @@ mkdirSync(path.join(stage, "app", "apps", "worker", "dist", "src"), {
 mkdirSync(path.join(stage, "app", "packages", "runtime", "dist"), {
   recursive: true,
 });
+mkdirSync(path.join(stage, "app", "packages", "infrastructure"), {
+  recursive: true,
+});
 
 cpSync(
   path.join(root, "apps", "worker", "dist", "src", "main.js"),
   path.join(stage, "app", "apps", "worker", "dist", "src", "main.js"),
+);
+cpSync(
+  path.join(root, "packages", "infrastructure", "migrations"),
+  path.join(stage, "app", "packages", "infrastructure", "migrations"),
+  { recursive: true },
 );
 cpSync(
   path.join(root, "packages", "runtime", "dist", "agent-base.mjs"),

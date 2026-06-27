@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
+    "acceptance:macos": "corepack pnpm -r build && corepack pnpm --filter @agent-base/runtime acceptance:macos",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "dev": "pnpm build && pnpm --filter @agent-base/runtime dev",
     "lint": "biome check .",

@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { readServiceHealth } from "@agent-base/infrastructure";
 
 export const dynamic = "force-dynamic";
 
@@ -10,23 +10,7 @@ export async function GET() {
       { status: 503 },
     );
   }
-  const sql = postgres(databaseUrl, { connect_timeout: 2, max: 1 });
-  let database: "healthy" | "unhealthy" = "unhealthy";
-  let worker: "healthy" | "unhealthy" = "unhealthy";
-
-  try {
-    await sql`select 1`;
-    database = "healthy";
-    const rows = await sql<{ recent: boolean }[]>`
-      select coalesce(last_seen_at > now() - interval '15 seconds', false) as recent
-      from runtime_heartbeat where process_name = 'worker'
-    `;
-    worker = rows[0]?.recent ? "healthy" : "unhealthy";
-  } catch {
-    // Report component state without exposing connection details.
-  } finally {
-    await sql.end({ timeout: 1 });
-  }
+  const { database, worker } = await readServiceHealth(databaseUrl);
 
   const status =
     database === "healthy" && worker === "healthy" ? "healthy" : "unhealthy";

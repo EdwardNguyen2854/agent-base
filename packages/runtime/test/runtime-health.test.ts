@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,8 +25,46 @@ describe("runtime health", () => {
       services: {
         web: { status: "stopped" },
         worker: { status: "stopped" },
-        database: { status: "unknown" },
+        database: { status: "stopped" },
       },
+    });
+  });
+
+  it("reports a reachable database when the web process is down", async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-base-test-"));
+    temporaryDirectories.push(directory);
+
+    const health = await new AgentBaseRuntime(directory, {
+      probeDatabase: async () => "healthy",
+    }).health();
+
+    expect(health).toMatchObject({
+      status: "unhealthy",
+      services: {
+        web: { status: "stopped" },
+        worker: { status: "stopped" },
+        database: { status: "healthy" },
+      },
+    });
+  });
+
+  it("does not report stopped when a live database process fails its health query", async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-base-test-"));
+    temporaryDirectories.push(directory);
+    const postgresDirectory = path.join(directory, "postgres");
+    mkdirSync(postgresDirectory);
+    writeFileSync(
+      path.join(postgresDirectory, "postmaster.pid"),
+      String(process.pid),
+    );
+
+    const health = await new AgentBaseRuntime(directory, {
+      probeDatabase: async () => "unhealthy",
+    }).health();
+
+    expect(health).toMatchObject({
+      status: "unhealthy",
+      services: { database: { status: "unhealthy" } },
     });
   });
 });

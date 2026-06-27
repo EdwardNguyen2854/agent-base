@@ -1,24 +1,16 @@
-import postgres from "postgres";
+import { startWorkerHeartbeat } from "@agent-base/infrastructure";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
-const sql = postgres(databaseUrl, { max: 1 });
+const workerHeartbeat = startWorkerHeartbeat(databaseUrl);
 
-async function heartbeat() {
-  await sql`
-    insert into runtime_heartbeat (process_name, last_seen_at)
-    values ('worker', now())
-    on conflict (process_name) do update set last_seen_at = excluded.last_seen_at
-  `;
-}
-
-await heartbeat();
-const timer = setInterval(() => void heartbeat(), 5_000);
+await workerHeartbeat.heartbeat();
+const timer = setInterval(() => void workerHeartbeat.heartbeat(), 5_000);
 
 async function shutdown() {
   clearInterval(timer);
-  await sql.end({ timeout: 2 });
+  await workerHeartbeat.close();
   process.exit(0);
 }
 

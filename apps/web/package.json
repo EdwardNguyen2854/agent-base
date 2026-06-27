@@ -8,8 +8,8 @@
     "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {
+    "@agent-base/infrastructure": "workspace:*",
     "next": "16.2.9",
-    "postgres": "3.4.7",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },

@@ -10,9 +10,15 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { initializeInstallation } from "@agent-base/application/initialize-installation.js";
-import postgres from "postgres";
-import { PostgresInstallationRepository } from "./postgres-installation-repository.js";
-import { createRuntimeConfig } from "./runtime-config.js";
+import {
+  initializeApplicationDatabase,
+  probeDatabase,
+  provisionApplicationDatabase,
+} from "@agent-base/infrastructure";
+import {
+  createPostgresHostAuthentication,
+  createRuntimeConfig,
+} from "./runtime-config.js";
 
 type RuntimeStatus = {
   status: "healthy" | "unhealthy" | "stopped";
@@ -20,25 +26,40 @@ type RuntimeStatus = {
   services: Record<string, { status: string; pid?: number }>;
 };
 
+type RuntimeDependencies = {
+  probeDatabase: (databaseUrl: string) => Promise<"healthy" | "unhealthy">;
+};
+
 export class AgentBaseRuntime {
   private readonly password: string;
+  private readonly adminPassword: string;
   private readonly config;
   private readonly appRoot: string;
   private readonly postgresBin: string;
   private readonly nodeBin: string;
 
-  constructor(dataDirectory = defaultDataDirectory()) {
+  private readonly dependencies: RuntimeDependencies;
+
+  constructor(
+    dataDirectory = defaultDataDirectory(),
+    dependencies: Partial<RuntimeDependencies> = {},
+  ) {
     mkdirSync(dataDirectory, { recursive: true });
     const credentialPath = path.join(dataDirectory, "database-password");
     this.password = loadOrCreateSecret(credentialPath);
+    this.adminPassword = loadOrCreateSecret(
+      path.join(dataDirectory, "database-admin-password"),
+    );
     this.config = createRuntimeConfig({
       dataDirectory,
       databasePassword: this.password,
+      databaseAdminPassword: this.adminPassword,
     });
     this.appRoot = process.env.AGENT_BASE_APP_ROOT ?? process.cwd();
     this.postgresBin =
       process.env.AGENT_BASE_POSTGRES_BIN ?? defaultPostgresBin(this.appRoot);
     this.nodeBin = process.env.AGENT_BASE_NODE ?? process.execPath;
+    this.dependencies = { probeDatabase, ...dependencies };
   }
 
   async initialize(): Promise<void> {
@@ -51,11 +72,11 @@ export class AgentBaseRuntime {
         "-D",
         this.config.database.dataDirectory,
         "-U",
-        "agent_base",
+        "agent_base_admin",
         "--encoding=UTF8",
         "--auth-host=scram-sha-256",
-        "--auth-local=trust",
-        `--pwfile=${path.join(this.config.dataDirectory, "database-password")}`,
+        "--auth-local=scram-sha-256",
+        `--pwfile=${path.join(this.config.dataDirectory, "database-admin-password")}`,
       ]);
       writeFileSync(
         path.join(this.config.database.dataDirectory, "postgresql.auto.conf"),
@@ -68,46 +89,20 @@ export class AgentBaseRuntime {
       );
       writeFileSync(
         path.join(this.config.database.dataDirectory, "pg_hba.conf"),
-        [
-          "local all all trust",
-          "host agent_base agent_base 127.0.0.1/32 scram-sha-256",
-          "host all all 0.0.0.0/0 reject",
-          "host all all ::0/0 reject",
-        ].join("\n"),
+        createPostgresHostAuthentication().join("\n"),
       );
     }
 
     this.startDatabase();
-    const adminUrl = this.config.database.url.replace(
-      /\/agent_base$/,
-      "/postgres",
+    await provisionApplicationDatabase(
+      this.config.database.adminUrl,
+      this.password,
     );
-    const admin = postgres(adminUrl, { max: 1 });
-    const databases = await admin<{ exists: boolean }[]>`
-      select exists(select from pg_database where datname = 'agent_base') as exists
-    `;
-    if (!databases[0]?.exists) await admin.unsafe("create database agent_base");
-    await admin.end();
-
-    const sql = postgres(this.config.database.url, { max: 1 });
-    await sql.unsafe("create extension if not exists vector");
-    await sql.unsafe(`
-      create table if not exists owner (
-        id uuid primary key,
-        name text not null
-      );
-      create table if not exists workspace (
-        id uuid primary key,
-        owner_id uuid not null references owner(id),
-        name text not null
-      );
-      create table if not exists runtime_heartbeat (
-        process_name text primary key,
-        last_seen_at timestamptz not null
-      );
-    `);
-    await initializeInstallation(new PostgresInstallationRepository(sql));
-    await sql.end();
+    await initializeApplicationDatabase(
+      this.config.database.url,
+      path.join(this.appRoot, "packages/infrastructure/migrations"),
+      initializeInstallation,
+    );
   }
 
   async start(): Promise<RuntimeStatus> {
@@ -134,29 +129,49 @@ export class AgentBaseRuntime {
 
   async health(): Promise<RuntimeStatus> {
     const pids = { web: this.readPid("web"), worker: this.readPid("worker") };
+    const databaseProbe = await this.dependencies.probeDatabase(
+      this.config.database.url,
+    );
+    const database =
+      databaseProbe === "healthy"
+        ? "healthy"
+        : this.readPostgresPid()
+          ? "unhealthy"
+          : "stopped";
     try {
       const response = await fetch(`${this.config.web.origin}/api/health`, {
         signal: AbortSignal.timeout(2_000),
       });
       const report = (await response.json()) as RuntimeStatus;
+      const web = report.services.web?.status ?? "unhealthy";
+      const worker = report.services.worker?.status ?? "unhealthy";
       return {
         ...report,
+        status:
+          web === "healthy" && worker === "healthy" && database === "healthy"
+            ? "healthy"
+            : "unhealthy",
         origin: this.config.web.origin,
         services: {
           ...report.services,
           web: {
-            status: report.services.web?.status ?? "unhealthy",
+            status: web,
             ...(pids.web ? { pid: pids.web } : {}),
           },
           worker: {
-            status: report.services.worker?.status ?? "unhealthy",
+            status: worker,
             ...(pids.worker ? { pid: pids.worker } : {}),
           },
+          database: { status: database },
         },
       };
     } catch {
+      const status =
+        !pids.web && !pids.worker && database === "stopped"
+          ? "stopped"
+          : "unhealthy";
       return {
-        status: pids.web || pids.worker ? "unhealthy" : "stopped",
+        status,
         origin: this.config.web.origin,
         services: {
           web: {
@@ -167,7 +182,7 @@ export class AgentBaseRuntime {
             status: pids.worker ? "unhealthy" : "stopped",
             ...(pids.worker ? { pid: pids.worker } : {}),
           },
-          database: { status: "unknown" },
+          database: { status: database },
         },
       };
     }
@@ -189,6 +204,7 @@ export class AgentBaseRuntime {
           }
         }
       }
+      if (pid) await waitForProcessExit(pid);
       writeFileSync(this.pidPath(processName), "");
     }
     if (
@@ -204,6 +220,12 @@ export class AgentBaseRuntime {
         "fast",
         "-w",
       ]);
+    }
+    const status = await this.health();
+    if (status.status !== "stopped") {
+      throw new Error(
+        `Agent Base did not stop cleanly: ${JSON.stringify(status.services)}`,
+      );
     }
   }
 
@@ -258,16 +280,35 @@ export class AgentBaseRuntime {
       args,
       { encoding: "utf8", windowsHide: true },
     );
-    if (result.status !== 0)
+    if (result.status !== 0) {
+      const detail = result.error?.message ?? result.stderr ?? result.stdout;
       throw new Error(
-        `${executable} failed: ${result.stderr || result.stdout}`,
+        `${executable} failed: ${detail || `exit status ${result.status}`}`,
       );
+    }
   }
 
   private readPid(name: "web" | "worker"): number | undefined {
     const pidPath = this.pidPath(name);
     if (!existsSync(pidPath)) return undefined;
     const pid = Number.parseInt(readFileSync(pidPath, "utf8"), 10);
+    if (!Number.isInteger(pid)) return undefined;
+    try {
+      process.kill(pid, 0);
+      return pid;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readPostgresPid(): number | undefined {
+    const pidPath = path.join(
+      this.config.database.dataDirectory,
+      "postmaster.pid",
+    );
+    if (!existsSync(pidPath)) return undefined;
+    const [firstLine] = readFileSync(pidPath, "utf8").split(/\r?\n/, 1);
+    const pid = Number.parseInt(firstLine ?? "", 10);
     if (!Number.isInteger(pid)) return undefined;
     try {
       process.kill(pid, 0);
@@ -312,4 +353,16 @@ function loadOrCreateSecret(secretPath: string) {
 
 function platformExecutable(name: string) {
   return process.platform === "win32" ? `${name}.exe` : name;
+}
+
+async function waitForProcessExit(pid: number) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Managed process ${pid} did not stop within 5 seconds`);
 }

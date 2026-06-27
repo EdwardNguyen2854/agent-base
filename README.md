@@ -24,6 +24,14 @@ pnpm --filter @agent-base/runtime exec tsx src/cli.ts stop
 
 Run `pnpm check` for formatting, type checks, and tests. Run `pnpm build` to create production assets.
 
+Run `pnpm acceptance:macos` for the repository-local production lifecycle check. It builds the runtime, launches web, worker, and PostgreSQL from a temporary application-data directory, verifies health and loopback listeners, stops them, and verifies both ports are closed.
+
+## Local database security model
+
+PostgreSQL listens only on `127.0.0.1`. Host authentication allows the bootstrap role to connect to the `postgres` maintenance database and the `agent_base` database for provisioning, while the application role can connect only to `agent_base`; all other host and local-socket connections are rejected. The application role cannot create databases or roles, replicate, or act as a superuser. Only the runtime reads the bootstrap Credential, while web and worker receive the least-privilege application Credential. Both generated Credentials inherit access restrictions from the Owner's application-data directory.
+
+This isolates Agent Base from remote hosts and unrelated database clients that do not possess a generated Credential. It does not enforce operating-system process identity: software running as the same Owner, or a local administrator, can inspect that Owner's files or processes and recover the Credentials. Native service identities and OS-level sandboxing are outside the single-Owner v0.1.0 model.
+
 ## Windows distribution
 
 The Windows acceptance workflow builds pgvector 0.8.2 against PostgreSQL 18.4, stages portable Node.js 24 LTS and PostgreSQL binaries, creates a per-Owner Inno Setup installer, and verifies install/start/health/loopback/stop behavior with machine-level development tools removed from `PATH`.

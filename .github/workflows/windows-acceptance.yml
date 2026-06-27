@@ -74,8 +74,11 @@ jobs:
           if ($health.status -ne "healthy") { throw "Runtime is not healthy" }
           $listeners = Get-NetTCPConnection -State Listen | Where-Object LocalPort -In 3210,54321
           if ($listeners.Where({$_.LocalAddress -ne "127.0.0.1"}).Count) { throw "A runtime listener is not loopback-only" }
+          $managedProcessIds = $listeners.OwningProcess | Select-Object -Unique
           & "$install\controls\AgentBase.ps1" stop
           if ((& "$install\controls\AgentBase.ps1" health | ConvertFrom-Json).status -ne "stopped") { throw "Runtime did not stop" }
+          if (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object LocalPort -In 3210,54321) { throw "A runtime port remains open after stop" }
+          if ($managedProcessIds | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }) { throw "A managed runtime process remains after stop" }
       - uses: actions/upload-artifact@v4
         with:
           name: agent-base-windows-x64
