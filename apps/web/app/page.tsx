@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { HealthPanel } from "./health-panel";
 
 export default function Home() {
@@ -10,6 +11,9 @@ export default function Home() {
         shown below.
       </p>
       <HealthPanel />
+      <p>
+        <Link href="/agents">Open Agent settings</Link>
+      </p>
     </main>
   );
 }

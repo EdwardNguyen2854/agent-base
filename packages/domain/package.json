@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent.js": "./src/agent.ts",
     "./installation.js": "./src/installation.ts"
   },
   "scripts": {

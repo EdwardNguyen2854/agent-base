@@ -4,13 +4,16 @@ import type {
   Workspace,
 } from "@agent-base/domain/installation.js";
 
-const OWNER: Owner = {
-  id: "00000000-0000-4000-8000-000000000001",
+export const OWNER_ID = "00000000-0000-4000-8000-000000000001";
+export const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
+
+export const OWNER: Owner = {
+  id: OWNER_ID,
   name: "Owner",
 };
 
-const WORKSPACE: Workspace = {
-  id: "00000000-0000-4000-8000-000000000002",
+export const WORKSPACE: Workspace = {
+  id: WORKSPACE_ID,
   name: "Agent Base",
 };
 
