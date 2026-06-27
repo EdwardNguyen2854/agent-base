@@ -7,12 +7,12 @@ import type {
 export const OWNER_ID = "00000000-0000-4000-8000-000000000001";
 export const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 
-const OWNER: Owner = {
+export const OWNER: Owner = {
   id: OWNER_ID,
   name: "Owner",
 };
 
-const WORKSPACE: Workspace = {
+export const WORKSPACE: Workspace = {
   id: WORKSPACE_ID,
   name: "Agent Base",
 };

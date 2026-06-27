@@ -10,7 +10,10 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { seedGeneralResearchAgent } from "@agent-base/application/agent-publishing.js";
-import { initializeInstallation } from "@agent-base/application/initialize-installation.js";
+import {
+  OWNER,
+  WORKSPACE,
+} from "@agent-base/application/initialize-installation.js";
 import type { Installation } from "@agent-base/domain/installation.js";
 import {
   initializeApplicationDatabase,
@@ -104,15 +107,12 @@ export class AgentBaseRuntime {
       this.config.database.url,
       path.join(this.appRoot, "packages/infrastructure/migrations"),
       async (repositories) => {
-        const installation = await initializeInstallation(
-          repositories.installation,
-        );
         await seedGeneralResearchAgent(
           repositories.agent,
-          installation.workspace.id,
-          installation.owner.id,
+          WORKSPACE.id,
+          OWNER.id,
         );
-        return installation;
+        return { owner: OWNER, workspace: WORKSPACE };
       },
     );
   }

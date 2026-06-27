@@ -7,7 +7,12 @@ import {
   AgentVersionConflictError,
   GENERAL_RESEARCH_AGENT_ID,
 } from "@agent-base/application/agent-publishing.js";
-import type { InstallationRepository } from "@agent-base/application/initialize-installation.js";
+import {
+  type InstallationRepository,
+  initializeInstallation,
+  OWNER,
+  WORKSPACE,
+} from "@agent-base/application/initialize-installation.js";
 import type { Owner, Workspace } from "@agent-base/domain/installation.js";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -322,13 +327,11 @@ export async function initializeApplicationDatabase<T>(
   const database = createDatabase(databaseUrl);
   try {
     await migrate(database.db, { migrationsFolder });
+    const installationRepo = new PostgresInstallationRepository(database);
+    await initializeInstallation(installationRepo);
     return await initialize({
-      installation: new PostgresInstallationRepository(database),
-      agent: new PostgresAgentRepository(
-        database,
-        process.env.AGENT_BASE_WORKSPACE_ID ?? "",
-        process.env.AGENT_BASE_OWNER_ID ?? "",
-      ),
+      installation: installationRepo,
+      agent: new PostgresAgentRepository(database, WORKSPACE.id, OWNER.id),
     });
   } finally {
     await database.client.end();
