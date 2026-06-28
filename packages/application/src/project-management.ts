@@ -8,7 +8,6 @@ import type {
   SourceState,
 } from "@agent-base/domain/project.js";
 import {
-  MAX_PROJECT_SOURCES,
   canTransitionSourceState,
   validateSourceFile,
   validateSourceLimits,
@@ -60,6 +59,9 @@ export interface ProjectRepository {
     query: string,
   ): Promise<readonly SearchResult[]>;
   listReadySourceIds(projectId: ProjectId): Promise<readonly SourceId[]>;
+  listProcessingSourcesOlderThan(
+    cutoff: Date,
+  ): Promise<readonly StuckProcessingSource[]>;
 }
 
 export class ProjectNotFoundError extends Error {
@@ -121,6 +123,7 @@ export async function loadProjectSources(
 export type AddSourceInput = Readonly<{
   name: string;
   size: number;
+  declaredMimeType?: string;
 }>;
 
 export async function addSource(
@@ -129,7 +132,11 @@ export async function addSource(
   input: AddSourceInput,
 ): Promise<ProjectSource> {
   const project = await loadProject(repository, projectId);
-  const validation = validateSourceFile(input.name, input.size);
+  const validation = validateSourceFile(
+    input.name,
+    input.size,
+    input.declaredMimeType,
+  );
   if (!validation.ok) throw new Error(validation.error);
 
   const sources = await repository.loadProjectSources(project.id);
@@ -191,4 +198,47 @@ export async function listReadySourceIds(
   projectId: ProjectId,
 ): Promise<readonly SourceId[]> {
   return repository.listReadySourceIds(projectId);
+}
+
+export interface StuckProcessingSource {
+  id: SourceId;
+  uploadedAt: Date;
+}
+
+export class SourceWatchdogError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceWatchdogError";
+  }
+}
+
+export async function failStuckProcessingSources(
+  repository: ProjectRepository,
+  stuckFor: { readonly olderThanMs: number; readonly now: Date },
+  options: { readonly errorMessage: string } = {
+    errorMessage: "Source ingestion did not complete in time",
+  },
+): Promise<readonly SourceId[]> {
+  const cutoff = stuckFor.now.getTime() - stuckFor.olderThanMs;
+  const stuck = await repository.listProcessingSourcesOlderThan(
+    new Date(cutoff),
+  );
+  const failed: SourceId[] = [];
+  for (const source of stuck) {
+    try {
+      await repository.updateSourceState(
+        source.id,
+        "failed",
+        options.errorMessage,
+      );
+      failed.push(source.id);
+    } catch (error) {
+      throw new SourceWatchdogError(
+        error instanceof Error
+          ? `Failed to mark stuck source ${source.id} as failed: ${error.message}`
+          : `Failed to mark stuck source ${source.id} as failed`,
+      );
+    }
+  }
+  return failed;
 }

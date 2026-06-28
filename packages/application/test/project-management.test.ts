@@ -1,15 +1,19 @@
-import { randomUUID } from "node:crypto";
-import type { Project, ProjectSource, SourceChunk } from "@agent-base/domain/project.js";
+import type {
+  Project,
+  ProjectSource,
+  SourceChunk,
+} from "@agent-base/domain/project.js";
 import { describe, expect, it } from "vitest";
 import {
-  type ProjectRepository,
-  createProject,
-  loadProject,
-  listProjects,
   addSource,
+  createProject,
+  failStuckProcessingSources,
+  listProjects,
+  loadProject,
+  type ProjectRepository,
   removeSource,
-  updateSourceState,
   searchSources,
+  updateSourceState,
   type WorkspaceId,
 } from "../src/project-management.js";
 
@@ -76,6 +80,10 @@ function createInMemoryRepository(): {
         [...sources.values()]
           .filter((s) => s.projectId === projectId && s.state === "ready")
           .map((s) => s.id),
+      listProcessingSourcesOlderThan: async (cutoff) =>
+        [...sources.values()]
+          .filter((s) => s.state === "processing" && s.uploadedAt < cutoff)
+          .map((s) => ({ id: s.id, uploadedAt: s.uploadedAt })),
     },
   };
 }
@@ -158,9 +166,9 @@ describe("loadProject", () => {
 
   it("throws when the project does not exist", async () => {
     const { repository } = createInMemoryRepository();
-    await expect(
-      loadProject(repository, "nonexistent"),
-    ).rejects.toThrow(/not found/i);
+    await expect(loadProject(repository, "nonexistent")).rejects.toThrow(
+      /not found/i,
+    );
   });
 });
 
@@ -341,7 +349,12 @@ describe("updateSourceState", () => {
       size: 1024,
     });
 
-    await updateSourceState(repository, source.id, "failed", "Processing error");
+    await updateSourceState(
+      repository,
+      source.id,
+      "failed",
+      "Processing error",
+    );
     expect(sources.get(source.id)?.state).toBe("failed");
     expect(sources.get(source.id)?.error).toBe("Processing error");
   });
@@ -431,5 +444,45 @@ describe("storeChunks integration", () => {
     ];
     await repository.storeChunks(testChunks);
     expect(chunks.size).toBe(2);
+  });
+});
+
+describe("failStuckProcessingSources", () => {
+  it("marks sources stuck in processing as failed", async () => {
+    const { repository, sources } = createInMemoryRepository();
+    const project = await createProject(repository, {
+      workspaceId: WORKSPACE_ID,
+      name: "Watchdog",
+      description: "",
+    });
+    const recent = await addSource(repository, project.id, {
+      name: "fresh.txt",
+      size: 1,
+    });
+    const old = await addSource(repository, project.id, {
+      name: "stale.txt",
+      size: 1,
+    });
+    const now = new Date();
+    sources.set(recent.id, {
+      ...recent,
+      state: "processing",
+      uploadedAt: now,
+    });
+    sources.set(old.id, {
+      ...old,
+      state: "processing",
+      uploadedAt: new Date(now.getTime() - 60_000),
+    });
+
+    const failed = await failStuckProcessingSources(repository, {
+      olderThanMs: 30_000,
+      now,
+    });
+
+    expect(failed).toEqual([old.id]);
+    expect(sources.get(old.id)?.state).toBe("failed");
+    expect(sources.get(old.id)?.error).toMatch(/did not complete/i);
+    expect(sources.get(recent.id)?.state).toBe("processing");
   });
 });

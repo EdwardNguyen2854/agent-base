@@ -119,6 +119,10 @@ describe("frontend helpers", () => {
         .error,
     ).toMatch(/unsupported/i);
     expect(
+      validateUpload({ name: "notes.txt", size: 1024, type: "application/pdf" })
+        .error,
+    ).toMatch(/does not match/i);
+    expect(
       validateUpload({
         name: "large.txt",
         size: 26 * 1024 * 1024,

@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+
+const PDF_FIXTURE =
+  "packages/infrastructure/test/fixtures/text-single-page.pdf";
+const DOCX_FIXTURE =
+  "packages/infrastructure/test/fixtures/text-with-headings.docx";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -70,6 +76,43 @@ test("Owner uploads a TXT source and sees state progression", async ({
   await expect(page.getByRole("cell", { name: /processing/i })).toBeVisible({
     timeout: 2000,
   });
+});
+
+test("Owner can upload every supported Source format", async ({ page }) => {
+  await page.goto("/projects");
+  await page.getByRole("link", { name: "New Project" }).click();
+  await page.getByLabel("Project name").fill("Format coverage");
+  await page.getByRole("button", { name: "Create Project" }).click();
+  await page.getByRole("link", { name: "Sources" }).click();
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Plain text evidence."),
+    },
+    {
+      name: "analysis.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Analysis\n\nMarkdown evidence."),
+    },
+    {
+      name: "brief.pdf",
+      mimeType: "application/pdf",
+      buffer: readFileSync(PDF_FIXTURE),
+    },
+    {
+      name: "interview.docx",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: readFileSync(DOCX_FIXTURE),
+    },
+  ]);
+  await expect(page.getByRole("cell", { name: "notes.txt" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "analysis.md" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "brief.pdf" })).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "interview.docx" }),
+  ).toBeVisible();
 });
 
 test("Owner uploads a Markdown source, sees it become ready, and deletes it", async ({

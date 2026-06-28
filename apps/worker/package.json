@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b && esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/src/main.js",
+    "build": "tsc -b && esbuild src/main.ts --bundle --platform=node --format=esm --external:pg-boss --outfile=dist/src/main.js",
     "start": "node dist/src/main.js",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@agent-base/infrastructure": "workspace:*"
+    "@agent-base/infrastructure": "workspace:*",
+    "pdf-parse": "1.1.1",
+    "pg-boss": "10.1.6"
   },
   "devDependencies": {
     "esbuild": "0.25.12"

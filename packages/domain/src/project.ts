@@ -43,6 +43,15 @@ export type SourceChunk = Readonly<{
 export const MAX_PROJECT_SOURCES = 100;
 export const MAX_SOURCE_FILE_SIZE = 25 * 1024 * 1024;
 
+export const SOURCE_MIME_TYPES: Record<SourceKind, readonly string[]> = {
+  txt: ["text/plain"],
+  markdown: ["text/markdown", "text/x-markdown"],
+  pdf: ["application/pdf"],
+  docx: [
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ],
+};
+
 export type SourceFileValidationResult =
   | { ok: true; kind: SourceKind }
   | { ok: false; error: string };
@@ -50,6 +59,7 @@ export type SourceFileValidationResult =
 export function validateSourceFile(
   name: string,
   size: number,
+  declaredMimeType?: string,
 ): SourceFileValidationResult {
   if (size <= 0) return { ok: false, error: "File is empty" };
   if (size > MAX_SOURCE_FILE_SIZE)
@@ -69,6 +79,15 @@ export function validateSourceFile(
       ok: false,
       error: "Unsupported file type. Use TXT, Markdown, PDF, or DOCX.",
     };
+  if (declaredMimeType) {
+    const allowed = SOURCE_MIME_TYPES[kind];
+    if (!allowed.includes(declaredMimeType)) {
+      return {
+        ok: false,
+        error: `Declared file type "${declaredMimeType}" does not match the file extension`,
+      };
+    }
+  }
   return { ok: true, kind };
 }
 
