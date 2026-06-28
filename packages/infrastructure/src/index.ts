@@ -7,6 +7,10 @@ import {
   AgentVersionConflictError,
   GENERAL_RESEARCH_AGENT_ID,
 } from "@agent-base/application/agent-publishing.js";
+import type {
+  ProjectRepository,
+  SearchResult,
+} from "@agent-base/application/project-management.js";
 import {
   type InstallationRepository,
   initializeInstallation,
@@ -14,6 +18,14 @@ import {
   WORKSPACE,
 } from "@agent-base/application/initialize-installation.js";
 import type { Owner, Workspace } from "@agent-base/domain/installation.js";
+import type {
+  Project,
+  ProjectId,
+  ProjectSource,
+  SourceChunk,
+  SourceId,
+  SourceState,
+} from "@agent-base/domain/project.js";
 import { eq, sql } from "drizzle-orm";
 import {
   boolean,
@@ -23,6 +35,7 @@ import {
   timestamp,
   unique,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -104,12 +117,58 @@ export const agentVersions = pgTable(
   }),
 );
 
+// ── Project & Source tables ──────────────────────────────────────
+
+export const projects = pgTable("project", {
+  id: uuid().primaryKey(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspaces.id),
+  name: text().notNull(),
+  description: text().notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+});
+
+export const projectSources = pgTable("project_source", {
+  id: uuid().primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  kind: text().notNull(),
+  size: integer().notNull(),
+  state: text().notNull().default("pending"),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+  error: text(),
+});
+
+export const sourceChunks = pgTable("source_chunk", {
+  id: uuid().primaryKey(),
+  sourceId: uuid("source_id")
+    .notNull()
+    .references(() => projectSources.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  content: text().notNull(),
+  locatorType: text("locator_type").notNull(),
+  locatorValue: text("locator_value").notNull(),
+  tokenCount: integer("token_count").notNull(),
+  embedding: vector("embedding", { dimensions: 384 }),
+});
+
 type Database = ReturnType<typeof createDatabase>;
 
 function createDatabase(databaseUrl: string) {
   const client = postgres(databaseUrl, { connect_timeout: 2, max: 1 });
   return { client, db: drizzle(client) };
 }
+
+// ── Installation repository ──────────────────────────────────────
 
 export class PostgresInstallationRepository implements InstallationRepository {
   constructor(private readonly database: Database) {}
@@ -125,6 +184,8 @@ export class PostgresInstallationRepository implements InstallationRepository {
       .onConflictDoNothing();
   }
 }
+
+// ── Agent repository ─────────────────────────────────────────────
 
 type AgentRow = typeof agents.$inferSelect;
 type AgentDraftRow = typeof agentDrafts.$inferSelect;
@@ -288,6 +349,208 @@ export class PostgresAgentRepository implements AgentRepository {
     return version;
   }
 }
+
+// ── Project repository ──────────────────────────────────────────
+
+export class PostgresProjectRepository implements ProjectRepository {
+  constructor(private readonly db: ReturnType<typeof drizzle>) {}
+
+  async createProject(project: Project): Promise<Project> {
+    await this.db.insert(projects).values(project);
+    return project;
+  }
+
+  async loadProject(id: ProjectId): Promise<Project | undefined> {
+    const rows = await this.db
+      .select()
+      .from(projects)
+      .where(sql`${projects.id} = ${id}`)
+      .limit(1);
+    return rows[0];
+  }
+
+  async listProjects(workspaceId: string): Promise<readonly Project[]> {
+    return this.db
+      .select()
+      .from(projects)
+      .where(sql`${projects.workspaceId} = ${workspaceId}`)
+      .orderBy(projects.createdAt);
+  }
+
+  async addSource(source: ProjectSource): Promise<ProjectSource> {
+    await this.db.insert(projectSources).values({
+      id: source.id,
+      projectId: source.projectId,
+      name: source.name,
+      kind: source.kind,
+      size: source.size,
+      state: source.state,
+      uploadedAt: source.uploadedAt,
+    });
+    return source;
+  }
+
+  async removeSource(sourceId: SourceId): Promise<void> {
+    await this.db
+      .delete(projectSources)
+      .where(sql`${projectSources.id} = ${sourceId}`);
+  }
+
+  async loadProjectSources(
+    projectId: ProjectId,
+  ): Promise<readonly ProjectSource[]> {
+    const rows = await this.db
+      .select()
+      .from(projectSources)
+      .where(sql`${projectSources.projectId} = ${projectId}`)
+      .orderBy(projectSources.uploadedAt);
+    return rows.map((row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      name: row.name,
+      kind: row.kind as ProjectSource["kind"],
+      size: row.size,
+      state: row.state as ProjectSource["state"],
+      uploadedAt: row.uploadedAt,
+      ...(row.error ? { error: row.error } : {}),
+    }));
+  }
+
+  async updateSourceState(
+    sourceId: SourceId,
+    state: SourceState,
+    error?: string,
+  ): Promise<void> {
+    const values: Record<string, unknown> = { state };
+    if (error !== undefined) values.error = error;
+    await this.db
+      .update(projectSources)
+      .set(values)
+      .where(sql`${projectSources.id} = ${sourceId}`);
+  }
+
+  async storeChunks(chunks: readonly SourceChunk[]): Promise<void> {
+    if (chunks.length === 0) return;
+    const rows = chunks.map((chunk) => ({
+      id: chunk.id,
+      sourceId: chunk.sourceId,
+      projectId: chunk.projectId,
+      content: chunk.content,
+      locatorType: chunk.locator.type,
+      locatorValue: chunk.locator.value,
+      tokenCount: chunk.tokenCount,
+      embedding: chunk.embedding
+        ? `[${chunk.embedding.join(",")}]`
+        : undefined,
+    }));
+    for (const row of rows) {
+      await this.db
+        .insert(sourceChunks)
+        .values(row as typeof sourceChunks.$inferInsert);
+    }
+  }
+
+  async deleteChunksBySource(sourceId: SourceId): Promise<void> {
+    await this.db
+      .delete(sourceChunks)
+      .where(sql`${sourceChunks.sourceId} = ${sourceId}`);
+  }
+
+  async deleteChunksByProject(projectId: ProjectId): Promise<void> {
+    await this.db
+      .delete(sourceChunks)
+      .where(sql`${sourceChunks.projectId} = ${projectId}`);
+  }
+
+  async searchProjectChunks(
+    projectId: ProjectId,
+    query: string,
+  ): Promise<readonly SearchResult[]> {
+    if (!query.trim()) return [];
+    const tsquery = query
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => `${w}:*`)
+      .join(" & ");
+    const rows = await this.db.execute<{
+      id: string;
+      source_id: string;
+      project_id: string;
+      content: string;
+      locator_type: string;
+      locator_value: string;
+      token_count: number;
+      rank: number;
+    }>(
+      sql`
+        SELECT
+          ch.id,
+          ch.source_id,
+          ch.project_id,
+          ch.content,
+          ch.locator_type,
+          ch.locator_value,
+          ch.token_count,
+          ts_rank(to_tsvector('english', ch.content), to_tsquery('english', ${tsquery})) AS rank
+        FROM ${sourceChunks} ch
+        WHERE
+          ch.project_id = ${projectId}
+          AND to_tsvector('english', ch.content) @@ to_tsquery('english', ${tsquery})
+        ORDER BY rank DESC
+        LIMIT 12
+      `,
+    );
+    return rows.map((row) => ({
+      chunk: {
+        id: row.id,
+        sourceId: row.source_id,
+        projectId: row.project_id,
+        content: row.content,
+        locator:
+          row.locator_type === "page"
+            ? { type: "page" as const, value: row.locator_value }
+            : row.locator_type === "heading"
+              ? { type: "heading" as const, value: row.locator_value }
+              : { type: "paragraph" as const, value: row.locator_value },
+        tokenCount: row.token_count,
+      },
+      score: row.rank,
+    }));
+  }
+
+  async listReadySourceIds(
+    projectId: ProjectId,
+  ): Promise<readonly SourceId[]> {
+    const rows = await this.db
+      .select({ id: projectSources.id })
+      .from(projectSources)
+      .where(
+        sql`${projectSources.projectId} = ${projectId} AND ${projectSources.state} = 'ready'`,
+      );
+    return rows.map((r) => r.id);
+  }
+}
+
+export type ProjectDatabaseHandle = Readonly<{
+  repository: PostgresProjectRepository;
+  close(): Promise<void>;
+}>;
+
+export async function createProjectDatabase(
+  databaseUrl: string,
+): Promise<ProjectDatabaseHandle> {
+  const client = postgres(databaseUrl, { connect_timeout: 2, max: 1 });
+  const db = drizzle(client);
+  return {
+    repository: new PostgresProjectRepository(db),
+    close: async () => {
+      await client.end({ timeout: 1 });
+    },
+  };
+}
+
+// ── Shared utilities ────────────────────────────────────────────
 
 function isUniqueViolation(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;

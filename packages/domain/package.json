@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     "./agent.js": "./src/agent.ts",
-    "./installation.js": "./src/installation.ts"
+    "./installation.js": "./src/installation.ts",
+    "./project.js": "./src/project.ts"
   },
   "scripts": {
     "build": "tsc -b",

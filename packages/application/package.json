@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     "./agent-publishing.js": "./src/agent-publishing.ts",
-    "./initialize-installation.js": "./src/initialize-installation.ts"
+    "./initialize-installation.js": "./src/initialize-installation.ts",
+    "./project-management.js": "./src/project-management.ts"
   },
   "scripts": {
     "build": "tsc -b",
