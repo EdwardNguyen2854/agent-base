@@ -1,3 +1,4 @@
+import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import {
   type Agent,
   type AgentDraft,
@@ -7,6 +8,10 @@ import {
   AgentVersionConflictError,
   GENERAL_RESEARCH_AGENT_ID,
 } from "@agent-base/application/agent-publishing.js";
+import {
+  type CredentialEncryptionPort,
+  type CredentialRepository,
+} from "@agent-base/application/credential-management.js";
 import type {
   ProjectRepository,
   SearchResult,
@@ -17,6 +22,7 @@ import {
   OWNER,
   WORKSPACE,
 } from "@agent-base/application/initialize-installation.js";
+import type { Credential as CredentialType } from "@agent-base/domain/credential.js";
 import type { Owner, Workspace } from "@agent-base/domain/installation.js";
 import type {
   Project,
@@ -159,6 +165,22 @@ export const sourceChunks = pgTable("source_chunk", {
   locatorValue: text("locator_value").notNull(),
   tokenCount: integer("token_count").notNull(),
   embedding: vector("embedding", { dimensions: 384 }),
+});
+
+export const credentials = pgTable("credential", {
+  provider: text("provider").primaryKey(),
+  id: uuid().notNull(),
+  encryptedSecret: text("encrypted_secret").notNull(),
+  nonce: text().notNull(),
+  hint: text().notNull(),
+  status: text().notNull(),
+  validatedAt: timestamp("validated_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .default(sql`now()`),
 });
 
 type Database = ReturnType<typeof createDatabase>;
@@ -352,8 +374,22 @@ export class PostgresAgentRepository implements AgentRepository {
 
 // ── Project repository ──────────────────────────────────────────
 
+function toProjectSource(row: typeof projectSources.$inferSelect): ProjectSource {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    name: row.name,
+    kind: row.kind as ProjectSource["kind"],
+    size: row.size,
+    state: row.state as ProjectSource["state"],
+    uploadedAt: row.uploadedAt,
+    ...(row.error ? { error: row.error } : {}),
+  };
+}
+
 export class PostgresProjectRepository implements ProjectRepository {
-  constructor(private readonly db: ReturnType<typeof drizzle>) {}
+  constructor(private readonly database: Database) {}
+  private get db() { return this.database.db; }
 
   async createProject(project: Project): Promise<Project> {
     await this.db.insert(projects).values(project);
@@ -404,16 +440,16 @@ export class PostgresProjectRepository implements ProjectRepository {
       .from(projectSources)
       .where(sql`${projectSources.projectId} = ${projectId}`)
       .orderBy(projectSources.uploadedAt);
-    return rows.map((row) => ({
-      id: row.id,
-      projectId: row.projectId,
-      name: row.name,
-      kind: row.kind as ProjectSource["kind"],
-      size: row.size,
-      state: row.state as ProjectSource["state"],
-      uploadedAt: row.uploadedAt,
-      ...(row.error ? { error: row.error } : {}),
-    }));
+    return rows.map(toProjectSource);
+  }
+
+  async loadSource(sourceId: SourceId): Promise<ProjectSource | undefined> {
+    const rows = await this.db
+      .select()
+      .from(projectSources)
+      .where(sql`${projectSources.id} = ${sourceId}`)
+      .limit(1);
+    return rows[0] ? toProjectSource(rows[0]) : undefined;
   }
 
   async updateSourceState(
@@ -473,6 +509,51 @@ export class PostgresProjectRepository implements ProjectRepository {
       .filter(Boolean)
       .map((w) => `${w}:*`)
       .join(" & ");
+    const sqlQuery = sql`
+      WITH ts_matches AS (
+        SELECT
+          ch.id,
+          ch.source_id,
+          ch.project_id,
+          ch.content,
+          ch.locator_type,
+          ch.locator_value,
+          ch.token_count,
+          ts_rank(to_tsvector('english', ch.content), to_tsquery('english', ${tsquery})) AS ts_rank
+        FROM ${sourceChunks} ch
+        WHERE
+          ch.project_id = ${projectId}
+          AND to_tsvector('english', ch.content) @@ to_tsquery('english', ${tsquery})
+      ),
+      trgm_matches AS (
+        SELECT
+          ch.id,
+          ch.source_id,
+          ch.project_id,
+          ch.content,
+          ch.locator_type,
+          ch.locator_value,
+          ch.token_count,
+          similarity(ch.content, ${query}) AS trgm_rank
+        FROM ${sourceChunks} ch
+        WHERE
+          ch.project_id = ${projectId}
+          AND ch.content % ${query}
+      )
+      SELECT
+        COALESCE(ts.id, trgm.id) AS id,
+        COALESCE(ts.source_id, trgm.source_id) AS source_id,
+        COALESCE(ts.project_id, trgm.project_id) AS project_id,
+        COALESCE(ts.content, trgm.content) AS content,
+        COALESCE(ts.locator_type, trgm.locator_type) AS locator_type,
+        COALESCE(ts.locator_value, trgm.locator_value) AS locator_value,
+        COALESCE(ts.token_count, trgm.token_count) AS token_count,
+        COALESCE(ts.ts_rank, 0) + COALESCE(trgm.trgm_rank, 0) AS rank
+      FROM ts_matches ts
+      FULL OUTER JOIN trgm_matches trgm ON ts.id = trgm.id
+      ORDER BY rank DESC
+      LIMIT 12
+    `;
     const rows = await this.db.execute<{
       id: string;
       source_id: string;
@@ -482,25 +563,7 @@ export class PostgresProjectRepository implements ProjectRepository {
       locator_value: string;
       token_count: number;
       rank: number;
-    }>(
-      sql`
-        SELECT
-          ch.id,
-          ch.source_id,
-          ch.project_id,
-          ch.content,
-          ch.locator_type,
-          ch.locator_value,
-          ch.token_count,
-          ts_rank(to_tsvector('english', ch.content), to_tsquery('english', ${tsquery})) AS rank
-        FROM ${sourceChunks} ch
-        WHERE
-          ch.project_id = ${projectId}
-          AND to_tsvector('english', ch.content) @@ to_tsquery('english', ${tsquery})
-        ORDER BY rank DESC
-        LIMIT 12
-      `,
-    );
+    }>(sqlQuery);
     return rows.map((row) => ({
       chunk: {
         id: row.id,
@@ -540,12 +603,11 @@ export type ProjectDatabaseHandle = Readonly<{
 export async function createProjectDatabase(
   databaseUrl: string,
 ): Promise<ProjectDatabaseHandle> {
-  const client = postgres(databaseUrl, { connect_timeout: 2, max: 1 });
-  const db = drizzle(client);
+  const database = createDatabase(databaseUrl);
   return {
-    repository: new PostgresProjectRepository(db),
+    repository: new PostgresProjectRepository(database),
     close: async () => {
-      await client.end({ timeout: 1 });
+      await database.client.end({ timeout: 1 });
     },
   };
 }
@@ -690,4 +752,110 @@ export function startWorkerHeartbeat(databaseUrl: string) {
     heartbeat,
     close: () => database.client.end({ timeout: 2 }),
   };
+}
+
+type Provider = "MiniMax" | "Tavily";
+type CredentialRow = typeof credentials.$inferSelect;
+
+function rowToCredential(row: CredentialRow): CredentialType {
+  return {
+    id: row.id,
+    provider: row.provider as Provider,
+    encryptedSecret: row.encryptedSecret,
+    nonce: row.nonce,
+    hint: row.hint,
+    status: row.status as CredentialType["status"],
+    validatedAt: row.validatedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function credentialToRow(credential: CredentialType) {
+  return {
+    provider: credential.provider,
+    id: credential.id,
+    encryptedSecret: credential.encryptedSecret,
+    nonce: credential.nonce,
+    hint: credential.hint,
+    status: credential.status,
+    validatedAt: credential.validatedAt,
+    createdAt: credential.createdAt,
+    updatedAt: credential.updatedAt,
+  };
+}
+
+export class PostgresCredentialRepository implements CredentialRepository {
+  constructor(private readonly database: Database) {}
+
+  async loadAll(): Promise<CredentialType[]> {
+    const rows = await this.database.db.select().from(credentials);
+    return rows.map(rowToCredential);
+  }
+
+  async load(provider: Provider): Promise<CredentialType | undefined> {
+    const rows = await this.database.db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.provider, provider))
+      .limit(1);
+    return rows[0] ? rowToCredential(rows[0]) : undefined;
+  }
+
+  async save(credential: CredentialType): Promise<void> {
+    await this.database.db
+      .insert(credentials)
+      .values(credentialToRow(credential))
+      .onConflictDoUpdate({
+        target: credentials.provider,
+        set: credentialToRow(credential),
+      });
+  }
+}
+
+export function createCredentialDatabase(databaseUrl: string) {
+  const database = createDatabase(databaseUrl);
+  return {
+    repository: new PostgresCredentialRepository(database),
+    close: () => database.client.end({ timeout: 1 }),
+  };
+}
+
+const ALGORITHM = "aes-256-gcm";
+const IV_LENGTH = 16;
+
+export class Aes256GcmEncryption implements CredentialEncryptionPort {
+  private readonly key: Buffer;
+
+  constructor(masterKeyHex: string) {
+    const key = Buffer.from(masterKeyHex, "hex");
+    if (key.byteLength !== 32) {
+      throw new Error("Encryption key must be 32 bytes (64 hex characters)");
+    }
+    this.key = key;
+  }
+
+  async encrypt(plaintext: string): Promise<{ encrypted: string; nonce: string }> {
+    const iv = randomBytes(IV_LENGTH);
+    const cipher = createCipheriv(ALGORITHM, this.key, iv);
+    const encrypted = Buffer.concat([
+      cipher.update(plaintext, "utf8"),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
+    return {
+      encrypted: Buffer.concat([encrypted, authTag]).toString("hex"),
+      nonce: iv.toString("hex"),
+    };
+  }
+
+  async decrypt(encryptedHex: string, nonceHex: string): Promise<string> {
+    const iv = Buffer.from(nonceHex, "hex");
+    const data = Buffer.from(encryptedHex, "hex");
+    const authTag = data.subarray(-16);
+    const ciphertext = data.subarray(0, -16);
+    const decipher = createDecipheriv(ALGORITHM, this.key, iv);
+    decipher.setAuthTag(authTag);
+    return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
+  }
 }

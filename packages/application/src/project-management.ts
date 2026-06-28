@@ -5,11 +5,11 @@ import type {
   ProjectSource,
   SourceChunk,
   SourceId,
-  SourceKind,
   SourceState,
 } from "@agent-base/domain/project.js";
 import {
   MAX_PROJECT_SOURCES,
+  canTransitionSourceState,
   validateSourceFile,
   validateSourceLimits,
 } from "@agent-base/domain/project.js";
@@ -46,6 +46,7 @@ export interface ProjectRepository {
   addSource(source: ProjectSource): Promise<ProjectSource>;
   removeSource(sourceId: SourceId): Promise<void>;
   loadProjectSources(projectId: ProjectId): Promise<readonly ProjectSource[]>;
+  loadSource(sourceId: SourceId): Promise<ProjectSource | undefined>;
   updateSourceState(
     sourceId: SourceId,
     state: SourceState,
@@ -156,12 +157,24 @@ export async function removeSource(
   await repository.removeSource(sourceId);
 }
 
+export class InvalidSourceStateTransitionError extends Error {
+  constructor(from: SourceState, to: SourceState) {
+    super(`Cannot transition source from ${from} to ${to}`);
+    this.name = "InvalidSourceStateTransitionError";
+  }
+}
+
 export async function updateSourceState(
   repository: ProjectRepository,
   sourceId: SourceId,
   state: SourceState,
   error?: string,
 ): Promise<void> {
+  const source = await repository.loadSource(sourceId);
+  if (!source) throw new Error(`Source ${sourceId} not found`);
+  if (!canTransitionSourceState(source.state, state)) {
+    throw new InvalidSourceStateTransitionError(source.state, state);
+  }
   await repository.updateSourceState(sourceId, state, error);
 }
 

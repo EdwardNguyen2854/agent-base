@@ -10,12 +10,10 @@ import {
   removeSource,
   updateSourceState,
   searchSources,
-  ProcessedSourceChunk,
-  WorkspaceId,
+  type WorkspaceId,
 } from "../src/project-management.js";
 
 const WORKSPACE_ID: WorkspaceId = "00000000-0000-4000-8000-000000000010";
-const SOURCE_KINDS = ["txt", "markdown"] as const;
 
 function createInMemoryRepository(): {
   repository: ProjectRepository;
@@ -73,6 +71,7 @@ function createInMemoryRepository(): {
         }
       },
       searchProjectChunks: async (_projectId, _query) => [],
+      loadSource: async (sourceId) => sources.get(sourceId),
       listReadySourceIds: async (projectId) =>
         [...sources.values()]
           .filter((s) => s.projectId === projectId && s.state === "ready")
@@ -313,7 +312,7 @@ describe("updateSourceState", () => {
     expect(sources.get(source.id)?.state).toBe("processing");
   });
 
-  it("updates source state to ready", async () => {
+  it("updates source state from processing to ready", async () => {
     const { repository, sources } = createInMemoryRepository();
     const project = await createProject(repository, {
       workspaceId: WORKSPACE_ID,
@@ -325,6 +324,7 @@ describe("updateSourceState", () => {
       size: 1024,
     });
 
+    await updateSourceState(repository, source.id, "processing");
     await updateSourceState(repository, source.id, "ready");
     expect(sources.get(source.id)?.state).toBe("ready");
   });
@@ -344,6 +344,42 @@ describe("updateSourceState", () => {
     await updateSourceState(repository, source.id, "failed", "Processing error");
     expect(sources.get(source.id)?.state).toBe("failed");
     expect(sources.get(source.id)?.error).toBe("Processing error");
+  });
+
+  it("rejects invalid transition from pending to ready", async () => {
+    const { repository } = createInMemoryRepository();
+    const project = await createProject(repository, {
+      workspaceId: WORKSPACE_ID,
+      name: "Test",
+      description: "",
+    });
+    const source = await addSource(repository, project.id, {
+      name: "notes.txt",
+      size: 1024,
+    });
+
+    await expect(
+      updateSourceState(repository, source.id, "ready"),
+    ).rejects.toThrow("Cannot transition source from pending to ready");
+  });
+
+  it("rejects transition from ready to processing", async () => {
+    const { repository } = createInMemoryRepository();
+    const project = await createProject(repository, {
+      workspaceId: WORKSPACE_ID,
+      name: "Test",
+      description: "",
+    });
+    const source = await addSource(repository, project.id, {
+      name: "notes.txt",
+      size: 1024,
+    });
+
+    await updateSourceState(repository, source.id, "processing");
+    await updateSourceState(repository, source.id, "ready");
+    await expect(
+      updateSourceState(repository, source.id, "processing"),
+    ).rejects.toThrow("Cannot transition source from ready to processing");
   });
 });
 
@@ -372,6 +408,7 @@ describe("storeChunks integration", () => {
       name: "notes.txt",
       size: 1024,
     });
+    await updateSourceState(repository, source.id, "processing");
     await updateSourceState(repository, source.id, "ready");
 
     const testChunks: SourceChunk[] = [

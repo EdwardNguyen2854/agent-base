@@ -62,6 +62,7 @@ export function chunkText(
       const overlap = takeLastTokens(buffer, overlapTokens);
       buffer = overlap;
       bufferTokens = estimateTokens(overlap);
+      currentHeading = undefined;
       paragraphIndex++;
     }
     buffer += (buffer ? "\n\n" : "") + trimmed;
