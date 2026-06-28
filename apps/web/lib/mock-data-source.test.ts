@@ -40,6 +40,23 @@ describe("MockFrontendDataSource", () => {
     expect(persisted).not.toContain("tavily-super-secret");
   });
 
+  it("rejects a credential shorter than 6 characters", () => {
+    const source = new MockFrontendDataSource();
+    expect(() => source.replaceCredential("MiniMax", "abc")).toThrow(
+      /6 characters/i,
+    );
+  });
+
+  it("accepts a credential of exactly 6 characters", () => {
+    const source = new MockFrontendDataSource();
+    source.replaceCredential("Tavily", "123456");
+    const cred = source
+      .getState()
+      .credentials.find((c) => c.provider === "Tavily");
+    expect(cred?.configured).toBe(true);
+    expect(cred?.status).toBe("healthy");
+  });
+
   it("enforces one active Run and releases queued work", () => {
     const source = new MockFrontendDataSource();
     source.approvePlan("run-2");
