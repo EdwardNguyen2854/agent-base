@@ -2,7 +2,7 @@
   "name": "@agent-base/web",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "next build && cp -r .next/static .next/standalone/apps/web/.next/static",
     "dev": "next dev --hostname 127.0.0.1 --port 3210",
     "start": "next start --hostname 127.0.0.1 --port 3210",
     "typecheck": "tsc --noEmit --pretty false"
