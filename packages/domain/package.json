@@ -6,7 +6,8 @@
     "./agent.js": "./src/agent.ts",
     "./installation.js": "./src/installation.ts",
     "./project.js": "./src/project.ts",
-    "./credential.js": "./src/credential.ts"
+    "./credential.js": "./src/credential.ts",
+    "./task-run.js": "./src/task-run.ts"
   },
   "scripts": {
     "build": "tsc -b",

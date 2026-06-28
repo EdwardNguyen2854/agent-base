@@ -41,6 +41,7 @@ export function serializeDraft(draft: AgentState["draft"]) {
 
 export function serializeVersion(version: AgentVersion) {
   return {
+    id: version.id,
     number: version.number,
     purpose: version.purpose,
     instructions: version.instructions,

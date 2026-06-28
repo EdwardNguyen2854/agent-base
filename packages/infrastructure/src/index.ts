@@ -22,6 +22,7 @@ import type {
   ProjectRepository,
   SearchResult,
 } from "@agent-base/application/project-management.js";
+import type { TaskRunRepository } from "@agent-base/application/task-runs.js";
 import type { Credential as CredentialType } from "@agent-base/domain/credential.js";
 import type { Owner, Workspace } from "@agent-base/domain/installation.js";
 import type {
@@ -32,10 +33,17 @@ import type {
   SourceId,
   SourceState,
 } from "@agent-base/domain/project.js";
-import { eq, sql } from "drizzle-orm";
+import type {
+  ResearchPlan,
+  Run,
+  RunSnapshot,
+  Task,
+} from "@agent-base/domain/task-run.js";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   boolean,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -165,6 +173,46 @@ export const sourceChunks = pgTable("source_chunk", {
   locatorValue: text("locator_value").notNull(),
   tokenCount: integer("token_count").notNull(),
   embedding: vector("embedding", { dimensions: 384 }),
+});
+
+export const researchTasks = pgTable("research_task", {
+  id: uuid().primaryKey(),
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => workspaces.id),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  title: text().notNull(),
+  goal: text().notNull(),
+  reportLanguage: text("report_language").notNull(),
+  selectedSources: jsonb("selected_sources")
+    .$type<Task["selectedSources"]>()
+    .notNull(),
+  webResearch: boolean("web_research").notNull(),
+  state: text().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+});
+
+type PersistedRunSnapshot = Omit<RunSnapshot, "agentVersion"> & {
+  agentVersion: Omit<RunSnapshot["agentVersion"], "publishedAt"> & {
+    publishedAt: string;
+  };
+};
+
+export const researchRuns = pgTable("research_run", {
+  id: uuid().primaryKey(),
+  taskId: uuid("task_id")
+    .notNull()
+    .references(() => researchTasks.id, { onDelete: "cascade" }),
+  state: text().notNull(),
+  snapshot: jsonb().$type<PersistedRunSnapshot>().notNull(),
+  researchPlan: jsonb("research_plan").$type<ResearchPlan>().notNull(),
+  approvalOwnerId: uuid("approval_owner_id").references(() => owners.id),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
 });
 
 export const credentials = pgTable("credential", {
@@ -624,6 +672,169 @@ export async function createProjectDatabase(
     close: async () => {
       await database.client.end({ timeout: 1 });
     },
+  };
+}
+
+function rowToTask(row: typeof researchTasks.$inferSelect): Task {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    projectId: row.projectId,
+    title: row.title,
+    goal: row.goal,
+    reportLanguage: row.reportLanguage,
+    selectedSources: row.selectedSources,
+    webResearch: row.webResearch,
+    state: row.state as Task["state"],
+    createdAt: row.createdAt,
+  };
+}
+
+function persistRunSnapshot(snapshot: RunSnapshot): PersistedRunSnapshot {
+  return {
+    ...snapshot,
+    agentVersion: {
+      ...snapshot.agentVersion,
+      publishedAt: snapshot.agentVersion.publishedAt.toISOString(),
+    },
+  };
+}
+
+function restoreRunSnapshot(snapshot: PersistedRunSnapshot): RunSnapshot {
+  return {
+    ...snapshot,
+    agentVersion: {
+      ...snapshot.agentVersion,
+      publishedAt: new Date(snapshot.agentVersion.publishedAt),
+    },
+  };
+}
+
+function rowToRun(row: typeof researchRuns.$inferSelect): Run {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    state: row.state as Run["state"],
+    snapshot: restoreRunSnapshot(row.snapshot),
+    researchPlan: row.researchPlan,
+    ...(row.approvalOwnerId && row.approvedAt
+      ? {
+          planApproval: {
+            ownerId: row.approvalOwnerId,
+            approvedAt: row.approvedAt,
+          },
+        }
+      : {}),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    ...(row.cancelledAt ? { cancelledAt: row.cancelledAt } : {}),
+  };
+}
+
+export class PostgresTaskRunRepository implements TaskRunRepository {
+  constructor(private readonly database: Database) {}
+
+  async loadProject(id: string): Promise<Project | undefined> {
+    const rows = await this.database.db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, id))
+      .limit(1);
+    return rows[0];
+  }
+
+  async loadSources(ids: readonly string[]): Promise<readonly ProjectSource[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.database.db
+      .select()
+      .from(projectSources)
+      .where(inArray(projectSources.id, [...ids]));
+    return rows.map(toProjectSource);
+  }
+
+  async loadAgentVersion(id: string): Promise<AgentVersion | undefined> {
+    const rows = await this.database.db
+      .select()
+      .from(agentVersions)
+      .where(eq(agentVersions.id, id))
+      .limit(1);
+    return rows[0] ? rowToVersion(rows[0]) : undefined;
+  }
+
+  async saveTask(task: Task): Promise<void> {
+    await this.database.db.insert(researchTasks).values(task);
+  }
+
+  async loadTask(id: string): Promise<Task | undefined> {
+    const rows = await this.database.db
+      .select()
+      .from(researchTasks)
+      .where(eq(researchTasks.id, id))
+      .limit(1);
+    return rows[0] ? rowToTask(rows[0]) : undefined;
+  }
+
+  async listTasks(workspaceId: string): Promise<readonly Task[]> {
+    const rows = await this.database.db
+      .select()
+      .from(researchTasks)
+      .where(eq(researchTasks.workspaceId, workspaceId))
+      .orderBy(researchTasks.createdAt);
+    return rows.map(rowToTask);
+  }
+
+  async saveRun(run: Run): Promise<void> {
+    const values = {
+      id: run.id,
+      taskId: run.taskId,
+      state: run.state,
+      snapshot: persistRunSnapshot(run.snapshot),
+      researchPlan: run.researchPlan,
+      approvalOwnerId: run.planApproval?.ownerId,
+      approvedAt: run.planApproval?.approvedAt,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      cancelledAt: run.cancelledAt,
+    };
+    await this.database.db
+      .insert(researchRuns)
+      .values(values)
+      .onConflictDoUpdate({
+        target: researchRuns.id,
+        set: {
+          state: values.state,
+          approvalOwnerId: values.approvalOwnerId,
+          approvedAt: values.approvedAt,
+          updatedAt: values.updatedAt,
+          cancelledAt: values.cancelledAt,
+        },
+      });
+  }
+
+  async loadRun(id: string): Promise<Run | undefined> {
+    const rows = await this.database.db
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.id, id))
+      .limit(1);
+    return rows[0] ? rowToRun(rows[0]) : undefined;
+  }
+
+  async listRunsForTask(taskId: string): Promise<readonly Run[]> {
+    const rows = await this.database.db
+      .select()
+      .from(researchRuns)
+      .where(eq(researchRuns.taskId, taskId))
+      .orderBy(researchRuns.createdAt);
+    return rows.map(rowToRun);
+  }
+}
+
+export function createTaskRunDatabase(databaseUrl: string) {
+  const database = createDatabase(databaseUrl);
+  return {
+    repository: new PostgresTaskRunRepository(database),
+    close: () => database.client.end({ timeout: 1 }),
   };
 }
 

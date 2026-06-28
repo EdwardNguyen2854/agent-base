@@ -179,6 +179,50 @@ test("Owner approves a Research Plan and advances the Run", async ({
   await expect(page.getByText("50%", { exact: true })).toBeVisible();
 });
 
+test("Owner creates a bounded Task, reviews its immutable Plan, and cancels the Run", async ({
+  page,
+}) => {
+  await page.goto("/tasks/new");
+  await page.getByRole("button", { name: "Create task & plan Run" }).click();
+  await expect(page).toHaveURL(/\/tasks\/new$/);
+  expect(
+    await page
+      .getByLabel("Research goal")
+      .evaluate((field: HTMLTextAreaElement) => field.validity.valueMissing),
+  ).toBe(true);
+  expect(
+    await page
+      .getByLabel("Report language")
+      .evaluate((field: HTMLSelectElement) => field.validity.valueMissing),
+  ).toBe(true);
+  await page.getByLabel("Task title").fill("Market evidence audit");
+  await page
+    .getByLabel("Research goal")
+    .fill("Identify the strongest evidence for market demand.");
+  await page.getByLabel("Report language").selectOption("Vietnamese");
+  await page.getByText("Market landscape.md", { exact: true }).click();
+  await page.getByText("Allow public web research", { exact: true }).click();
+  await page.getByRole("button", { name: "Create task & plan Run" }).click();
+
+  await expect(page).toHaveURL(/\/runs\//);
+  await expect(
+    page.getByRole("heading", { name: "Review the Research Plan" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Identify the strongest evidence for market demand."),
+  ).toBeVisible();
+  await expect(page.getByText("1 Project Sources")).toBeVisible();
+  await expect(page.getByText("Find and validate public evidence")).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("button", { name: /edit plan/i })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Cancel run" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Cancel this run?" });
+  await dialog.getByRole("button", { name: "Cancel run" }).click();
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+});
+
 test("Owner inspects a citation, requests revision, and accepts a Report", async ({
   page,
 }) => {

@@ -225,9 +225,13 @@ export function NewTaskView() {
   const [projectId, setProjectId] = useState(state.projects[0]?.id ?? "");
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
-  const [language, setLanguage] = useState("English");
+  const [language, setLanguage] = useState("");
   const [webResearch, setWebResearch] = useState(true);
   const [selected, setSelected] = useState<string[]>([]);
+  const latestAgentVersion = state.agents[0]?.versions.at(-1)?.number;
+  const [agentVersion, setAgentVersion] = useState(
+    latestAgentVersion?.toString() ?? "",
+  );
   const project = state.projects.find((item) => item.id === projectId);
 
   const submit = (event: FormEvent) => {
@@ -240,7 +244,7 @@ export function NewTaskView() {
       sourceIds: selected,
       webResearch,
     });
-    const run = source.createRun(task.id);
+    const run = source.createRun(task.id, undefined, Number(agentVersion));
     router.push(`/runs/${run.id}`);
   };
 
@@ -298,11 +302,30 @@ export function NewTaskView() {
                 label="Report language"
                 value={language}
                 onChange={(event) => setLanguage(event.target.value)}
+                required
               >
-                <option>English</option>
-                <option>Vietnamese</option>
-                <option>French</option>
-                <option>Spanish</option>
+                <option value="">Select a Report language</option>
+                <option value="English">English</option>
+                <option value="Vietnamese">Vietnamese</option>
+                <option value="French">French</option>
+                <option value="Spanish">Spanish</option>
+              </SelectField>
+            </div>
+
+            <div className="mt-5">
+              <SelectField
+                label="Agent Version"
+                value={agentVersion}
+                onChange={(event) => setAgentVersion(event.target.value)}
+                required
+              >
+                {state.agents.flatMap((agent) =>
+                  agent.versions.map((version) => (
+                    <option key={version.id} value={version.number}>
+                      {agent.name} v{version.number}
+                    </option>
+                  )),
+                )}
               </SelectField>
             </div>
 

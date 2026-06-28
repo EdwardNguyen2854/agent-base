@@ -231,7 +231,7 @@ export class MockFrontendDataSource implements FrontendDataSource {
     return task;
   }
 
-  createRun(taskId: string, feedback?: string) {
+  createRun(taskId: string, feedback?: string, agentVersion?: number) {
     let run!: Run;
     this.update((state) => {
       const task = state.tasks.find((item) => item.id === taskId);
@@ -242,7 +242,8 @@ export class MockFrontendDataSource implements FrontendDataSource {
       run = {
         id: id("run"),
         taskId,
-        agentVersion: state.agents[0]?.versions.at(-1)?.number ?? 1,
+        agentVersion:
+          agentVersion ?? state.agents[0]?.versions.at(-1)?.number ?? 1,
         state: active ? "queued" : "awaiting_approval",
         createdAt: timestamp(),
         updatedAt: timestamp(),

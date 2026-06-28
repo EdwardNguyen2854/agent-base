@@ -7,7 +7,8 @@
     "./initialize-installation.js": "./src/initialize-installation.ts",
     "./project-management.js": "./src/project-management.ts",
     "./credential-management.js": "./src/credential-management.ts",
-    "./source-ingestion.js": "./src/source-ingestion.ts"
+    "./source-ingestion.js": "./src/source-ingestion.ts",
+    "./task-runs.js": "./src/task-runs.ts"
   },
   "scripts": {
     "build": "tsc -b",

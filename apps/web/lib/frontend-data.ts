@@ -162,7 +162,7 @@ export interface FrontendDataSource {
   ): ProjectSource;
   removeSource(projectId: string, sourceId: string): void;
   createTask(input: NewTask): Task;
-  createRun(taskId: string, feedback?: string): Run;
+  createRun(taskId: string, feedback?: string, agentVersion?: number): Run;
   approvePlan(runId: string): void;
   cancelRun(runId: string): void;
   resumeRun(runId: string): void;
