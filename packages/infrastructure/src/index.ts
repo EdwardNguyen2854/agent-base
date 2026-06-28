@@ -1,4 +1,4 @@
-import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import {
   type Agent,
   type AgentDraft,
@@ -8,20 +8,20 @@ import {
   AgentVersionConflictError,
   GENERAL_RESEARCH_AGENT_ID,
 } from "@agent-base/application/agent-publishing.js";
-import {
-  type CredentialEncryptionPort,
-  type CredentialRepository,
-} from "@agent-base/application/credential-management.js";
 import type {
-  ProjectRepository,
-  SearchResult,
-} from "@agent-base/application/project-management.js";
+  CredentialEncryptionPort,
+  CredentialRepository,
+} from "@agent-base/application/credential-management.js";
 import {
   type InstallationRepository,
   initializeInstallation,
   OWNER,
   WORKSPACE,
 } from "@agent-base/application/initialize-installation.js";
+import type {
+  ProjectRepository,
+  SearchResult,
+} from "@agent-base/application/project-management.js";
 import type { Credential as CredentialType } from "@agent-base/domain/credential.js";
 import type { Owner, Workspace } from "@agent-base/domain/installation.js";
 import type {
@@ -374,7 +374,9 @@ export class PostgresAgentRepository implements AgentRepository {
 
 // ── Project repository ──────────────────────────────────────────
 
-function toProjectSource(row: typeof projectSources.$inferSelect): ProjectSource {
+function toProjectSource(
+  row: typeof projectSources.$inferSelect,
+): ProjectSource {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -389,7 +391,9 @@ function toProjectSource(row: typeof projectSources.$inferSelect): ProjectSource
 
 export class PostgresProjectRepository implements ProjectRepository {
   constructor(private readonly database: Database) {}
-  private get db() { return this.database.db; }
+  private get db() {
+    return this.database.db;
+  }
 
   async createProject(project: Project): Promise<Project> {
     await this.db.insert(projects).values(project);
@@ -475,9 +479,7 @@ export class PostgresProjectRepository implements ProjectRepository {
       locatorType: chunk.locator.type,
       locatorValue: chunk.locator.value,
       tokenCount: chunk.tokenCount,
-      embedding: chunk.embedding
-        ? `[${chunk.embedding.join(",")}]`
-        : undefined,
+      embedding: chunk.embedding ? `[${chunk.embedding.join(",")}]` : undefined,
     }));
     for (const row of rows) {
       await this.db
@@ -582,9 +584,7 @@ export class PostgresProjectRepository implements ProjectRepository {
     }));
   }
 
-  async listReadySourceIds(
-    projectId: ProjectId,
-  ): Promise<readonly SourceId[]> {
+  async listReadySourceIds(projectId: ProjectId): Promise<readonly SourceId[]> {
     const rows = await this.db
       .select({ id: projectSources.id })
       .from(projectSources)
@@ -592,6 +592,21 @@ export class PostgresProjectRepository implements ProjectRepository {
         sql`${projectSources.projectId} = ${projectId} AND ${projectSources.state} = 'ready'`,
       );
     return rows.map((r) => r.id);
+  }
+
+  async listProcessingSourcesOlderThan(
+    cutoff: Date,
+  ): Promise<ReadonlyArray<{ id: SourceId; uploadedAt: Date }>> {
+    const rows = await this.db
+      .select({
+        id: projectSources.id,
+        uploadedAt: projectSources.uploadedAt,
+      })
+      .from(projectSources)
+      .where(
+        sql`${projectSources.state} = 'processing' AND ${projectSources.uploadedAt} < ${cutoff}`,
+      );
+    return rows.map((row) => ({ id: row.id, uploadedAt: row.uploadedAt }));
   }
 }
 
@@ -835,7 +850,9 @@ export class Aes256GcmEncryption implements CredentialEncryptionPort {
     this.key = key;
   }
 
-  async encrypt(plaintext: string): Promise<{ encrypted: string; nonce: string }> {
+  async encrypt(
+    plaintext: string,
+  ): Promise<{ encrypted: string; nonce: string }> {
     const iv = randomBytes(IV_LENGTH);
     const cipher = createCipheriv(ALGORITHM, this.key, iv);
     const encrypted = Buffer.concat([
@@ -856,6 +873,8 @@ export class Aes256GcmEncryption implements CredentialEncryptionPort {
     const ciphertext = data.subarray(0, -16);
     const decipher = createDecipheriv(ALGORITHM, this.key, iv);
     decipher.setAuthTag(authTag);
-    return decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8");
+    return (
+      decipher.update(ciphertext, undefined, "utf8") + decipher.final("utf8")
+    );
   }
 }

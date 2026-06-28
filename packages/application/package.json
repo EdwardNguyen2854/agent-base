@@ -6,7 +6,8 @@
     "./agent-publishing.js": "./src/agent-publishing.ts",
     "./initialize-installation.js": "./src/initialize-installation.ts",
     "./project-management.js": "./src/project-management.ts",
-    "./credential-management.js": "./src/credential-management.ts"
+    "./credential-management.js": "./src/credential-management.ts",
+    "./source-ingestion.js": "./src/source-ingestion.ts"
   },
   "scripts": {
     "build": "tsc -b",

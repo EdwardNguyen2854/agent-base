@@ -4,7 +4,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./source-ingestion.js": "./src/source-ingestion.ts"
+    "./source-blob-store.js": "./src/source-blob-store.ts",
+    "./source-ingestion-queue.js": "./src/source-ingestion-queue.ts",
+    "./source-ingestion.js": "./src/source-ingestion.ts",
+    "./source-ingestion-service.js": "./src/source-ingestion-service.ts"
   },
   "scripts": {
     "build": "tsc -b",
@@ -14,6 +17,14 @@
     "@agent-base/application": "workspace:*",
     "@agent-base/domain": "workspace:*",
     "drizzle-orm": "0.44.5",
+    "fflate": "0.8.2",
+    "pdf-parse": "1.1.1",
+    "pg-boss": "10.1.6",
     "postgres": "3.4.7"
+  },
+  "devDependencies": {
+    "@types/pdf-parse": "1.1.4",
+    "docx": "9.0.2",
+    "pdf-lib": "1.17.1"
   }
 }

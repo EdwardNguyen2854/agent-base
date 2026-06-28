@@ -515,6 +515,17 @@ export function validateUpload(file: {
     return {
       error: "Unsupported file. Use text-based PDF, DOCX, Markdown, or TXT.",
     };
+  const allowedMimeTypes: Record<ProjectSource["kind"], string[]> = {
+    PDF: ["application/pdf"],
+    DOCX: [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ],
+    Markdown: ["text/markdown", "text/x-markdown"],
+    Text: ["text/plain"],
+  };
+  if (file.type && !allowedMimeTypes[kind].includes(file.type)) {
+    return { error: "Declared file type does not match the extension." };
+  }
   return { kind };
 }
 

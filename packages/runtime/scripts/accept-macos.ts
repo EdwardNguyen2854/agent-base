@@ -12,11 +12,13 @@ const root = path.resolve(import.meta.dirname, "../../..");
 const dataDirectory = mkdtempSync(
   path.join(tmpdir(), "agent-base-acceptance-"),
 );
+const sourcesDirectory = path.join(dataDirectory, "sources");
 const cli = path.join(root, "packages/runtime/dist/agent-base.mjs");
 const environment = {
   ...process.env,
   AGENT_BASE_APP_ROOT: root,
   AGENT_BASE_HOME: dataDirectory,
+  AGENT_BASE_SOURCES_DIRECTORY: sourcesDirectory,
 };
 
 function run(command: string) {

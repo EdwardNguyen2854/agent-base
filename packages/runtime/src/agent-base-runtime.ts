@@ -125,6 +125,8 @@ export class AgentBaseRuntime {
       {
         AGENT_BASE_OWNER_ID: installation.owner.id,
         AGENT_BASE_WORKSPACE_ID: installation.workspace.id,
+        AGENT_BASE_HOME: this.config.dataDirectory,
+        AGENT_BASE_SOURCES_DIRECTORY: this.config.sourcesDirectory,
       },
     );
     this.startManagedProcess(
@@ -135,6 +137,8 @@ export class AgentBaseRuntime {
         PORT: String(this.config.web.port),
         AGENT_BASE_OWNER_ID: installation.owner.id,
         AGENT_BASE_WORKSPACE_ID: installation.workspace.id,
+        AGENT_BASE_HOME: this.config.dataDirectory,
+        AGENT_BASE_SOURCES_DIRECTORY: this.config.sourcesDirectory,
       },
     );
     for (let attempt = 0; attempt < 30; attempt += 1) {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_PROJECT_SOURCES,
-  MAX_SOURCE_FILE_SIZE,
   type Project,
   type ProjectSource,
   type SourceChunk,
@@ -50,6 +49,22 @@ describe("validateSourceFile", () => {
     const result = validateSourceFile("empty.md", 0);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/empty/i);
+  });
+
+  it("accepts a declared MIME type that matches the extension", () => {
+    const result = validateSourceFile("report.pdf", 1024, "application/pdf");
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a declared MIME type that does not match the extension", () => {
+    const result = validateSourceFile("notes.txt", 1024, "application/pdf");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/does not match/i);
+  });
+
+  it("ignores a blank declared MIME type", () => {
+    const result = validateSourceFile("report.pdf", 1024, "");
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -130,7 +145,7 @@ describe("Project and ProjectSource types", () => {
       embedding: new Float32Array([0.1, 0.2, 0.3]),
     };
     expect(chunk.tokenCount).toBe(8);
-    expect(chunk.embedding!.length).toBe(3);
+    expect(chunk.embedding?.length).toBe(3);
   });
 
   it("SourceChunk accepts paragraph locators", () => {

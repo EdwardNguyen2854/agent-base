@@ -49,5 +49,6 @@ export function createRuntimeConfig(input: {
     },
     logsDirectory: path.join(dataDirectory, "logs"),
     runDirectory: path.join(dataDirectory, "run"),
+    sourcesDirectory: path.join(dataDirectory, "sources"),
   } as const;
 }
