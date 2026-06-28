@@ -15,6 +15,8 @@ export function createPostgresHostAuthentication() {
 
 export type RuntimeConfig = ReturnType<typeof createRuntimeConfig>;
 
+const WEB_HOST = "0.0.0.0";
+
 export function createRuntimeConfig(input: {
   dataDirectory: string;
   webPort?: number;
@@ -29,9 +31,9 @@ export function createRuntimeConfig(input: {
   return {
     dataDirectory,
     web: {
-      host: LOOPBACK_HOST,
+      host: WEB_HOST,
       port: webPort,
-      origin: `http://${LOOPBACK_HOST}:${webPort}`,
+      origin: `http://127.0.0.1:${webPort}`,
     },
     database: {
       host: LOOPBACK_HOST,
