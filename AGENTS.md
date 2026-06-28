@@ -6,6 +6,8 @@ Issues and PRDs are tracked in GitHub Issues, and external pull requests are als
 
 ### Working on issues
 
+Before starting work on an issue, ask the user whether they want a dedicated Git worktree or the current worktree.
+
 Always work on a branch when implementing, fixing, or otherwise modifying code for an issue. Do not commit directly to `main`. Create a branch (typically named after the issue or scope of work), do the work there, and merge via the normal review flow.
 
 ### Parallel AI sessions
