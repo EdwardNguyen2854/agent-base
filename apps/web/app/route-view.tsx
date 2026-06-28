@@ -10,6 +10,11 @@ export { DashboardView } from "../components/views/dashboard-view";
 export { AgentsView } from "../components/views/agents-view";
 export { AgentDetailView } from "../components/views/agent-detail-view";
 export { AgentSettings } from "../components/views/agent-settings";
+export {
+  WorkspacesView,
+  WorkflowsView,
+  ConnectorsView,
+} from "../components/views/workspaces-view";
 export { ProjectsView, NewProjectView } from "../components/views/projects-view";
 export { ProjectDetailView } from "../components/views/project-detail-view";
 export { TasksView, TaskDetailView, NewTaskView } from "../components/views/tasks-view";
